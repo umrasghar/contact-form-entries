@@ -54,150 +54,139 @@ class vxcf_form {
   //settings    
   public static $meta = null;    
 
+public function instance(){
+
+add_action( 'plugins_loaded', array( $this, 'setup_main' ) );
+register_deactivation_hook(__FILE__,array($this,'deactivate'));
+register_activation_hook(__FILE__,(array($this,'activate')));
+self::$path=$this->get_base_path(); 
+self::$base_url=vxcf_form::get_base_url();
+add_action('init', array($this,'init'));
+add_filter('crmperks_forms_field_validation_message',array($this,'validate_crmperks_field'),10,4);
+}
 
 
+public  function init(){
+    //save screen and url for all forms
+add_action('wp_footer', array($this,'footer_js'),33);
+wp_register_script( 'vx-tablesorter-js', self::$base_url. 'js/jquery.tablesorter.js',array('jquery') );
+wp_register_script( 'vx-tablepager-js', self::$base_url. 'js/jquery.tablesorter.pager.js',array('jquery') );
+wp_register_script( 'vx-tablewidgets-js', self::$base_url. 'js/jquery.tablesorter.widgets.js',array('jquery') );
 
-    public function instance(){
-    
-        add_action( 'plugins_loaded', array( $this, 'setup_main' ) );
-        register_deactivation_hook(__FILE__,array($this,'deactivate'));
-        register_activation_hook(__FILE__,(array($this,'activate')));
-        self::$path=$this->get_base_path(); 
-        self::$base_url=vxcf_form::get_base_url();
-        add_action('init', array($this,'init'));
-        add_filter('crmperks_forms_field_validation_message',array($this,'validate_crmperks_field'),10,4);
+//$this->get_form_fields('na_1'); die();
+if(!empty($_GET['vx_crm_form_action']) && $_GET['vx_crm_form_action'] == 'download_csv'){
+  $key=$this->post('vx_crm_key');
+   $form_ids=get_option('vx_crm_forms_ids'); 
+   if(is_array($form_ids)){ 
+     $form_id=array_search($key,$form_ids);
+     if(!empty($form_id)){
+         vxcf_form::set_form_fields($form_id);
+         self::download_csv($form_id,array('vx_links'=>'false'));
+         die();
+     }  
+   } 
+}
+//$form=vxcf_form::get_form_fields('el_2669e21_5190'); var_dump($form);
+//$form=vxcf_form::get_form_fields('wp_5137'); var_dump($form); die();
+//$form=cfx_form::get_form('1'); var_dump($form); die();
+
+}
+
+public  function setup_main(){
+
+  //handling post submission.
+//  add_action("gform_entry_created", array($this, 'gf_entry_created'), 40, 2);
+// add_filter('wpcf7_mail_components', array($this, 'submission'), 999, 3);
+// add_filter('wpcf7_posted_data', array($this, 'entry_created'));
+// wordpress sets current user to 0 here wp-includes/rest-api.php rest_cookie_check_errors function 
+ add_action('rest_api_init', array($this, 'verify_logged_in_user'),10); 
+  add_filter('wpcf7_before_send_mail', array($this, 'create_entry_cf'),10);
+  //add_action('fsctf_mail_sent', array($this, 'create_entry_fscf'));
+  add_action("gform_entry_created", array($this, 'create_entry_gf'), 30, 2);
+  //formidable
+  add_action('frm_after_create_entry', array($this, 'create_entry_fd'), 30, 2);
+  //add_action('ninja_forms_post_process', array($this, 'create_entry_na'),30);
+  add_action('ninja_forms_after_submission', array($this, 'create_entry_na'),30);
+  add_action('iphorm_post_process', array($this, 'create_entry_qu'), 30);
+  add_action('caldera_forms_submit_post_process_end', array($this, 'create_entry_ca'), 10, 3);
+  add_action('cforms2_after_processing_action', array(&$this, 'create_entry_c2'),30);
+  add_action('cntctfrm_get_mail_data', array(&$this, 'create_entry_be'),30);
+  add_action('ufbl_email_send', array(&$this, 'create_entry_ul'),30);
+  add_action('grunion_pre_message_sent', array(&$this, 'create_entry_jp'),30,3);
+  add_filter('crmperks_forms_new_submission', array(&$this, 'create_entry_vf'),40,3);
+  //add_action( 'woocommerce_checkout_update_order_meta',array(&$this,'create_entry_wc'), 30, 2 );
+  add_action( 'wpforms_process_entry_save',array(&$this,'create_entry_wp'), 30, 4 );
+ //   add_action('cntctfrm_get_attachment_data', array(&$this, 'create_entry_be'),30);
+// add_filter('si_contact_email_fields_posted', array($this, 'test'),10,2);
+//elemntor form
+ add_action( 'elementor_pro/forms/new_record', array($this,'create_entry_el'), 10 );
+// add_action('wpcf7_submit', array($this, 'submit'),10, 2);
+//add_action('wpcf7_init', array($this, 'create_entry'));
+//$this->create_entry();
+add_shortcode('vx-entries', array($this, 'entries_shortcode'));  
+
+$pro_file=self::$path . 'pro/pro.php';
+if(file_exists($pro_file)){ include_once($pro_file); self::$is_pr='1'; }
+
+  if(is_admin()){
+load_plugin_textdomain('contact-form-entries', FALSE,  self::plugin_dir_name(). '/languages/' );     
+  self::$db_version=get_option(vxcf_form::$type."_version");
+  if(self::$db_version != self::$version && current_user_can( 'manage_options' )){
+  
+  $this->install_plugin();    
+  
+/*  $install_data=get_option(vxcf_form::$type."_install_data");
+  if(empty($install_data)){
+  update_option(vxcf_form::$type."_install_data", array('time'=>current_time( 'timestamp' , 1 )));
+  }*/
+$meta=$this->get_meta();  
+  if(!empty($meta['save_forms'])){
+ $forms=vxcf_form::get_forms();
+ $forms_arr=vxcf_form::forms_list($forms);
+$new_ids=array_diff_key($forms_arr,$meta['save_forms']);
+if(!empty($new_ids)){
+   $disable=array();
+    foreach($new_ids as $k=>$v){
+     $disable[$k]='yes';   
     }
+    $meta['disable_track']=$disable;
+    unset($meta['save_forms']);
+    self::$meta=$meta;
+ update_option(vxcf_form::$id.'_meta',$meta);   
+}
+} }
+//plugin api
+$this->plugin_api(true);
+require_once(self::$path . "includes/crmperks-cf.php");
+require_once(self::$path . "includes/plugin-pages.php");   
+self::$pages=new vxcf_form_pages(); 
+
+$pro_file=self::$path . 'pro/add-ons.php';
+if(file_exists($pro_file)){ include_once($pro_file); }
+$pro_file=self::$path . 'wp/crmperks-notices.php';
+if(file_exists($pro_file)){ include_once($pro_file); }
+//$forms=vxcf_form::get_forms();  
+}
+
+}
 
 
-    public  function init(){
-        //save screen and url for all forms
-        add_action('wp_footer', array($this,'footer_js'),33);
-        wp_register_script( 'vx-tablesorter-js', self::$base_url. 'js/jquery.tablesorter.js',array('jquery') );
-        wp_register_script( 'vx-tablepager-js', self::$base_url. 'js/jquery.tablesorter.pager.js',array('jquery') );
-        wp_register_script( 'vx-tablewidgets-js', self::$base_url. 'js/jquery.tablesorter.widgets.js',array('jquery') );
-        
-        
-        //$this->get_form_fields('na_1'); die();
-        if(!empty($_GET['vx_crm_form_action']) && $_GET['vx_crm_form_action'] == 'download_csv'){
-          $key=$this->post('vx_crm_key');
-           $form_ids=get_option('vx_crm_forms_ids'); 
-           if(is_array($form_ids)){ 
-             $form_id=array_search($key,$form_ids);
-             if(!empty($form_id)){
-                 vxcf_form::set_form_fields($form_id);
-                 self::download_csv($form_id,array('vx_links'=>'false'));
-                 die();
-             }  
-           } 
-        }
-        //$form=vxcf_form::get_form_fields('el_2669e21_5190'); var_dump($form);
-        //$form=vxcf_form::get_form_fields('wp_5137'); var_dump($form); die();
-        //$form=cfx_form::get_form('1'); var_dump($form); die();
-    
-    }
-
-    public  function setup_main(){
-    
-          //handling post submission.
-        //  add_action("gform_entry_created", array($this, 'gf_entry_created'), 40, 2);
-        // add_filter('wpcf7_mail_components', array($this, 'submission'), 999, 3);
-        // add_filter('wpcf7_posted_data', array($this, 'entry_created'));
-        // wordpress sets current user to 0 here wp-includes/rest-api.php rest_cookie_check_errors function 
-         add_action('rest_api_init', array($this, 'verify_logged_in_user'),10); 
-          add_filter('wpcf7_before_send_mail', array($this, 'create_entry_cf'),10);
-          //add_action('fsctf_mail_sent', array($this, 'create_entry_fscf'));
-          add_action("gform_entry_created", array($this, 'create_entry_gf'), 30, 2);
-          //formidable
-          add_action('frm_after_create_entry', array($this, 'create_entry_fd'), 30, 2);
-          //add_action('ninja_forms_post_process', array($this, 'create_entry_na'),30);
-          add_action('ninja_forms_after_submission', array($this, 'create_entry_na'),30);
-          add_action('iphorm_post_process', array($this, 'create_entry_qu'), 30);
-          add_action('caldera_forms_submit_post_process_end', array($this, 'create_entry_ca'), 10, 3);
-          add_action('cforms2_after_processing_action', array(&$this, 'create_entry_c2'),30);
-          add_action('cntctfrm_get_mail_data', array(&$this, 'create_entry_be'),30);
-          add_action('ufbl_email_send', array(&$this, 'create_entry_ul'),30);
-          add_action('grunion_pre_message_sent', array(&$this, 'create_entry_jp'),30,3);
-          add_filter('crmperks_forms_new_submission', array(&$this, 'create_entry_vf'),40,3);
-          //add_action( 'woocommerce_checkout_update_order_meta',array(&$this,'create_entry_wc'), 30, 2 );
-          add_action( 'wpforms_process_entry_save',array(&$this,'create_entry_wp'), 30, 4 );
-         //   add_action('cntctfrm_get_attachment_data', array(&$this, 'create_entry_be'),30);
-        // add_filter('si_contact_email_fields_posted', array($this, 'test'),10,2);
-        //elemntor form
-         add_action( 'elementor_pro/forms/new_record', array($this,'create_entry_el'), 10 );
-        // add_action('wpcf7_submit', array($this, 'submit'),10, 2);
-        //add_action('wpcf7_init', array($this, 'create_entry'));
-        //$this->create_entry();
-        add_shortcode('vx-entries', array($this, 'entries_shortcode'));  
-        
-        add_shortcode( 'custom_frontend_display', 'custom_frontend_display_shortcode');
-        // Load frontend shortcodes file
-        require_once(plugin_dir_path(__FILE__) . 'frontend-shortcodes.php');
-        require_once(plugin_dir_path(__FILE__) . 'frontend-lists.php');
-        
-        
-        $pro_file=self::$path . 'pro/pro.php';
-        if(file_exists($pro_file)){ include_once($pro_file); self::$is_pr='1'; }
-        
-          if(is_admin()){
-        load_plugin_textdomain('contact-form-entries', FALSE,  self::plugin_dir_name(). '/languages/' );     
-          self::$db_version=get_option(vxcf_form::$type."_version");
-          if(self::$db_version != self::$version && current_user_can( 'manage_options' )){
-          
-          $this->install_plugin();    
-          
-        /*  $install_data=get_option(vxcf_form::$type."_install_data");
-          if(empty($install_data)){
-          update_option(vxcf_form::$type."_install_data", array('time'=>current_time( 'timestamp' , 1 )));
-          }*/
-        $meta=$this->get_meta();  
-          if(!empty($meta['save_forms'])){
-         $forms=vxcf_form::get_forms();
-         $forms_arr=vxcf_form::forms_list($forms);
-        $new_ids=array_diff_key($forms_arr,$meta['save_forms']);
-        if(!empty($new_ids)){
-           $disable=array();
-            foreach($new_ids as $k=>$v){
-             $disable[$k]='yes';   
-            }
-            $meta['disable_track']=$disable;
-            unset($meta['save_forms']);
-            self::$meta=$meta;
-         update_option(vxcf_form::$id.'_meta',$meta);   
-        }
-        } }
-        //plugin api
-        $this->plugin_api(true);
-        require_once(self::$path . "includes/crmperks-cf.php");
-        require_once(self::$path . "includes/plugin-pages.php");   
-        self::$pages=new vxcf_form_pages(); 
-        
-        $pro_file=self::$path . 'pro/add-ons.php';
-        if(file_exists($pro_file)){ include_once($pro_file); }
-        $pro_file=self::$path . 'wp/crmperks-notices.php';
-        if(file_exists($pro_file)){ include_once($pro_file); }
-        //$forms=vxcf_form::get_forms();  
-        }
-    
-    }
-
-
-    public function plugin_api($start_instance=false){
-        $file=self::$path . "pro/plugin-api.php";
-        if( file_exists($file)){   
-            if(!class_exists('vxcf_plugin_api')){    include_once($file); }
-            if(class_exists('vxcf_plugin_api')){
-                $update_id = "400001";
-                $title='Contact Form Entries Plugin';
-                $slug=self::get_slug();
-                $settings_link=self::link_to_settings();
-                $is_plugin_page=self::is_crm_page(); 
-                self::$plugin=new vxcf_plugin_api(self::$id,self::$version,self::$type,$this->domain,$update_id,$title,$slug,self::$path,$settings_link,$is_plugin_page);
-                if($start_instance){
-                    self::$plugin->instance();
-                }
-            }
-        } 
-    }
+public function plugin_api($start_instance=false){
+$file=self::$path . "pro/plugin-api.php";
+if( file_exists($file)){   
+if(!class_exists('vxcf_plugin_api')){    include_once($file); }
+if(class_exists('vxcf_plugin_api')){
+ $update_id = "400001";
+ $title='Contact Form Entries Plugin';
+ $slug=self::get_slug();
+ $settings_link=self::link_to_settings();
+ $is_plugin_page=self::is_crm_page(); 
+self::$plugin=new vxcf_plugin_api(self::$id,self::$version,self::$type,$this->domain,$update_id,$title,$slug,self::$path,$settings_link,$is_plugin_page);
+if($start_instance){
+self::$plugin->instance();
+} }
+} 
+}
 
 public function install_plugin(){
 $data=vxcf_form::get_data_object();
@@ -355,19 +344,6 @@ include($leads_table);
 return ob_get_clean();
 }
 
-/*******************************************************  Include shortcode to display the code form report */
-
-
-public function custom_frontend_display_shortcode() {
-    ob_start();
-
-    // Output your HTML code
-    // include_once(plugin_dir_path(_FILE_) . '/includes/sfqaiser-assesment-report.php');
-    include_once(self::$path . "templates/leadsFrontend.php");
-    return ob_get_clean();
-}
-
-/*********************************************************************/
 public function verify_logged_in_user(){
    self::$user_id=get_current_user_id();
 }
@@ -1374,12 +1350,12 @@ public function get_forms_jetpack(){
             'post_type' => 'jetpack'
              ) );
 }
-    public function get_meta(){
-        if(is_null(self::$meta)){
-            self::$meta=get_option(vxcf_form::$id.'_meta',array());
-         }
-        return self::$meta;   
-    }
+public function get_meta(){
+if(is_null(self::$meta)){
+self::$meta=get_option(vxcf_form::$id.'_meta',array());
+ }
+return self::$meta;   
+}
 public function track_form_entry($type,$form_id){
 $meta=$this->get_meta();
 $res=true;
@@ -1548,7 +1524,6 @@ $fields=vxcf_form::get_form_fields($form_id);
 
 //var_dump($leads,$fields);die();                              
 include_once(self::$path . "templates/print.php");
-
 exit;  
 }
 /**
@@ -3112,21 +3087,3 @@ $vxcf_form=new vxcf_form();
 $vxcf_form->instance();
 if(!isset($vx_cf)){ $vx_cf=array(); } 
 $vx_cf['vxcf_form']='vxcf_form';
-
-
-
-// // Include shortcode to display the assessment form report
-function frontend_leads_shortcode() {
-    ob_start();
-
-    // Output your HTML code
-    include_once(plugin_dir_path(__FILE__) . '/templates/leads-front-sf.php');
-    //include_once(plugin_dir_path(__FILE__) . '/templates/leadsFrontend.php');
-    return ob_get_clean();
-
-    
-}
-add_shortcode('frontend_leads', 'frontend_leads_shortcode');
-
-
-
